@@ -5,7 +5,9 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Http\Requests\LoginRequest;
 use App\Http\Requests\RegisterRequest;
+use App\Http\Requests\RegisterUserRequest;
 use App\Models\User;
+use App\Models\Role;
 use App\Traits\ApiResponse;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Http\Request;
@@ -58,38 +60,19 @@ class AuthController extends Controller
      * 
      * POST /api/register
      * 
-     * Public registration creates kasir account.
-     * REQ-AUTH-08: Only owner can register admin and kasir via authenticated endpoint.
-     *
      * @param RegisterRequest $request
      * @return \Illuminate\Http\JsonResponse
      */
     public function register(RegisterRequest $request)
     {
-        // Determine which role to assign
-        $roleName = 'kasir'; // Default role for public registration
-        $isAuthenticatedRequest = $request->user() !== null;
-
-        // If request is authenticated (owner registering others)
-        if ($isAuthenticatedRequest) {
-            $roleName = $request->input('role', 'kasir');
-        }
-
-        // Get the role
-        $role = \App\Models\Role::where('name', $roleName)->first();
-
-        if (!$role) {
-            return $this->errorResponse(
-                'Role not found',
-                500
-            );
-        }
+        // Get default role (kasir)
+        $defaultRole = Role::where('name', 'kasir')->first();
 
         $user = User::create([
             'name' => $request->name,
             'email' => $request->email,
             'password' => Hash::make($request->password),
-            'role_id' => $role->id,
+            'role_id' => $defaultRole?->id,
         ]);
 
         $token = $user->createToken('auth-token')->plainTextToken;
@@ -105,6 +88,46 @@ class AuthController extends Controller
             'token' => $token,
             'token_type' => 'Bearer',
         ], 'Registration successful', 201);
+    }
+
+    /**
+     * Register user endpoint (Owner only)
+     * 
+     * POST /api/auth/register-user
+     * 
+     * Only users with 'owner' role can register new admin or kasir users.
+     * 
+     * @param RegisterUserRequest $request
+     * @return \Illuminate\Http\JsonResponse
+     */
+    public function registerUser(RegisterUserRequest $request)
+    {
+        // Get the role by name
+        $role = Role::where('name', $request->role)->first();
+
+        if (!$role) {
+            return $this->errorResponse(
+                'Role not found',
+                400
+            );
+        }
+
+        $user = User::create([
+            'name' => $request->name,
+            'email' => $request->email,
+            'password' => Hash::make($request->password),
+            'role_id' => $role->id,
+        ]);
+
+        return $this->successResponse([
+            'user' => [
+                'id' => $user->id,
+                'name' => $user->name,
+                'email' => $user->email,
+                'role' => $user->role ? $user->role->name : null,
+                'role_id' => $user->role_id,
+            ],
+        ], 'User registered successfully', 201);
     }
 
     /**
